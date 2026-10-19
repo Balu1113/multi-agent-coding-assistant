@@ -1,0 +1,28 @@
+[project]
+name = "multi-agent-coding-assistant"
+version = "0.1.0"
+description = "A multi-agent coding assistant with MCP, RAG, fine-tuning, and evaluation"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "numpy>=1.24.0",
+    "rich>=13.0.0",
+    "asyncio",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.optional-dependencies]
+rag = ["chromadb>=0.4.0", "sentence-transformers>=2.2.0"]
+fine-tune = ["torch>=2.0.0", "transformers>=4.30.0", "datasets>=2.12.0", "peft>=0.5.0"]
+monitoring = ["prometheus-client>=0.17.0", "psutil>=5.9.0"]
+all = ["multi-agent-coding-assistant[rag,fine-tune,monitoring]"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

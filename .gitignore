@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.env.*
+!.env.example
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Django and local databases
+*.log
+local_settings.py
+*.sqlite3
+*.sqlite3-journal
+
+# Frontend
+node_modules/
+
+# Local generated data (repository root only)
+/data/
+/reports/
+/models/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
