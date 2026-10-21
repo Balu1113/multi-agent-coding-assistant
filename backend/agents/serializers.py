@@ -27,11 +27,47 @@ class WorkflowOutputSerializer(serializers.Serializer):
     duration = serializers.FloatField(default=0.0)
 
 
+class WorkspaceFileSerializer(serializers.Serializer):
+    path = serializers.CharField(max_length=500)
+    action = serializers.ChoiceField(choices=("write", "delete", "delete_directory"), default="write")
+    content = serializers.CharField(max_length=60000, allow_blank=True, required=False, default="")
+    truncated = serializers.BooleanField(required=False, default=False)
+
+
+class WorkspaceHistoryMessageSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=("user", "assistant"))
+    content = serializers.CharField(max_length=4000, allow_blank=True)
+
+
+class WorkspaceToolResultSerializer(serializers.Serializer):
+    tool = serializers.ChoiceField(choices=("search_workspace", "read_file", "list_directory"))
+    query = serializers.CharField(required=False, default="", max_length=200, allow_blank=True)
+    path = serializers.CharField(required=False, default="", max_length=500, allow_blank=True)
+    result = serializers.CharField(max_length=50000, allow_blank=True)
+
+
+class WorkspaceAgentInputSerializer(serializers.Serializer):
+    prompt = serializers.CharField(required=True, min_length=1, max_length=5000)
+    inventory = serializers.CharField(required=False, default="", max_length=8000, allow_blank=True)
+    directories = serializers.ListField(child=serializers.CharField(max_length=500), required=False, default=list, max_length=1000)
+    files = serializers.ListField(child=WorkspaceFileSerializer(), required=False, default=list, max_length=14)
+    history = serializers.ListField(
+        child=WorkspaceHistoryMessageSerializer(), required=False, default=list, max_length=20,
+    )
+    tool_results = serializers.ListField(
+        child=WorkspaceToolResultSerializer(), required=False, default=list, max_length=4,
+    )
+    model = serializers.CharField(required=False, default="", allow_blank=True)
+    approved_requirement = serializers.CharField(required=False, default="", max_length=5000, allow_blank=True)
+    approved_plan = serializers.CharField(required=False, default="", max_length=10000, allow_blank=True)
+
+
 class ChatInputSerializer(serializers.Serializer):
     message = serializers.CharField(required=True, min_length=1, max_length=5000)
     history = serializers.ListField(required=False, default=[])
     model = serializers.CharField(required=False, default="")
     web_search = serializers.BooleanField(required=False, default=True)
+    workspace_context = serializers.CharField(required=False, default="", max_length=1500000)
 
 
 class ChatOutputSerializer(serializers.Serializer):

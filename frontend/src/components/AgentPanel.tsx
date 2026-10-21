@@ -98,6 +98,10 @@ function classifyPrompt(text: string): 'chat' | 'coding' | 'debug' {
     if (p.test(text)) return 'chat'
   }
   if (errorScore >= 1) return 'debug'
+  const directCodingRequest = /^(?:please\s+)?(?:write|implement|create|build|fix|debug|refactor|generate|review|test|add|remove|update|delete|modify|change)\b/i
+  const askedCodingRequest = /^(?:can|could|would)\s+you\s+(?:please\s+)?(?:help me\s+)?(?:write|implement|create|build|fix|debug|refactor|generate|review|test|add|remove|update|delete|modify|change)\b/i
+  if (directCodingRequest.test(text) || askedCodingRequest.test(text)) return 'coding'
+  if (/^(?:what|which|why|how|when|where|who|is|are|do|does|did|can|could|would|should)\b/i.test(text)) return 'chat'
   const codingScore = CODING_KEYWORDS.filter((kw) => lower.includes(kw)).length
   if (codingScore >= 2) return 'coding'
   if (codingScore >= 1) return 'coding'
@@ -600,7 +604,10 @@ export default function AgentPanel() {
           body: JSON.stringify({ message: desc, history, model: selectedModel, web_search: webSearchEnabled }),
         })
         const data = await res.json()
-        updateLastEntry(entryIdNum, { type: 'chat', message: data.message })
+        updateLastEntry(entryIdNum, {
+          type: 'chat',
+          message: res.ok ? data.message : data.error || 'The chat model request failed.',
+        })
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         updateLastEntry(entryIdNum, { type: 'chat', message: `Sorry, I couldn't reach the server: ${msg}` })
@@ -668,6 +675,10 @@ export default function AgentPanel() {
         setCurrentStatus('❌ Error')
         addLog(`[Orchestrator] Error: ${data.error}`)
         setAgentTask('coder', null)
+        updateLastEntry(entryIdNum, {
+          type: 'chat',
+          message: data.error || 'The agent could not complete this request.',
+        })
       } else {
         addLog(`[Coder] Code generated (${data.code.length} chars)`)
         setCurrentStatus('🔍 Reviewing code...')

@@ -6,11 +6,13 @@ import MCPServerPanel from './components/MCPServerPanel'
 import RAGPanel from './components/RAGPanel'
 import FineTuningPanel from './components/FineTuningPanel'
 import MonitorDashboard from './components/MonitorDashboard'
+import WorkspacePanel from './components/WorkspacePanel'
 
-type Tab = 'agents' | 'mcp' | 'rag' | 'fine-tune' | 'monitor'
+type Tab = 'agents' | 'workspace' | 'mcp' | 'rag' | 'fine-tune' | 'monitor'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'agents', label: 'Agents', icon: '🤖' },
+  { id: 'workspace', label: 'Workspace', icon: '📂' },
   { id: 'mcp', label: 'MCP Server', icon: '🔌' },
   { id: 'rag', label: 'RAG', icon: '📚' },
   { id: 'fine-tune', label: 'Fine-Tuning', icon: '🎯' },
@@ -24,6 +26,8 @@ export default function App() {
     switch (activeTab) {
       case 'agents':
         return <AgentPanel />
+      case 'workspace':
+        return null
       case 'mcp':
         return <MCPServerPanel />
       case 'rag':
@@ -41,7 +45,10 @@ export default function App() {
       activeTab={activeTab}
       onTabChange={(id) => setActiveTab(id as Tab)}
     >
-      {renderTab()}
+      <div style={{ height: '100%', display: activeTab === 'workspace' ? 'block' : 'none' }}>
+        <WorkspacePanel />
+      </div>
+      {activeTab !== 'workspace' && renderTab()}
     </Layout>
   )
 }

@@ -7,6 +7,9 @@ import asyncio
 import threading
 from pathlib import Path
 
+import httpx
+from django.http import JsonResponse, StreamingHttpResponse
+from django.views import View
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,6 +20,7 @@ if PROJECT_ROOT not in sys.path:
 
 from agents.serializers import (
     WorkflowInputSerializer,
+    WorkspaceAgentInputSerializer,
     ChatInputSerializer,
     DebugInputSerializer,
     LanguagesOutputSerializer,
@@ -99,6 +103,60 @@ class ModelsView(APIView):
             "models": get_available_models(),
             "current": get_model(),
         })
+
+
+class GitProxyView(View):
+    def get(self, request, remote_path: str):
+        if not remote_path.endswith("/info/refs") or request.GET.get("service") != "git-upload-pack":
+            return JsonResponse({"error": "Only GitHub upload-pack discovery is supported."}, status=400)
+        return self._forward(request, remote_path)
+
+    def post(self, request, remote_path: str):
+        if not remote_path.endswith("/git-upload-pack"):
+            return JsonResponse({"error": "Only GitHub upload-pack requests are supported."}, status=400)
+        return self._forward(request, remote_path)
+
+    def _forward(self, request, remote_path: str):
+        if not re.fullmatch(
+            r"github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?/(?:info/refs|git-upload-pack)",
+            remote_path,
+        ):
+            return JsonResponse({"error": "Only public GitHub repository URLs are supported."}, status=400)
+
+        upstream_url = f"https://{remote_path}"
+        if request.META.get("QUERY_STRING"):
+            upstream_url += f"?{request.META['QUERY_STRING']}"
+        headers = {
+            name: request.headers[name]
+            for name in ("Accept", "Content-Type", "Git-Protocol")
+            if request.headers.get(name)
+        }
+        client = httpx.Client(timeout=httpx.Timeout(120, connect=15), follow_redirects=False)
+        try:
+            upstream_request = client.build_request(
+                request.method,
+                upstream_url,
+                headers=headers,
+                content=request.body if request.method == "POST" else None,
+            )
+            upstream = client.send(upstream_request, stream=True)
+        except httpx.HTTPError as exc:
+            client.close()
+            logger.warning("GitHub clone proxy request failed: %s", exc)
+            return JsonResponse({"error": "Could not reach GitHub. Check your network and try again."}, status=502)
+
+        def response_body():
+            try:
+                yield from upstream.iter_bytes()
+            finally:
+                upstream.close()
+                client.close()
+
+        response = StreamingHttpResponse(response_body(), status=upstream.status_code)
+        content_type = upstream.headers.get("content-type")
+        if content_type:
+            response["Content-Type"] = content_type
+        return response
 
 
 class HealthView(APIView):
@@ -185,6 +243,37 @@ class WorkflowView(APIView):
             }, status=500)
 
 
+class WorkspaceAgentView(APIView):
+    def post(self, request: Request):
+        serializer = WorkspaceAgentInputSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        data = serializer.validated_data
+        if data["model"]:
+            from src.llm_service import set_model
+
+            set_model(data["model"])
+        try:
+            from src.llm_service import generate_workspace_response
+
+            result = generate_workspace_response(
+                prompt=data["prompt"],
+                inventory=data["inventory"],
+                directories=data["directories"],
+                files=data["files"],
+                conversation_history=data["history"],
+                tool_results=data["tool_results"],
+                approved_requirement=data["approved_requirement"],
+                approved_plan=data["approved_plan"],
+                model=data["model"] or None,
+            )
+            return Response(result)
+        except Exception as exc:
+            logger.exception("Workspace agent failed")
+            return Response({"error": str(exc)}, status=502)
+
+
 def _chat_reply(message: str) -> str | None:
     """Return a canned reply if pattern matches, else None (caller should use LLM)."""
     msg = message.lower().strip()
@@ -227,7 +316,8 @@ class ChatView(APIView):
         history = serializer.validated_data.get("history", [])
         model = serializer.validated_data.get("model", "")
         web_search = serializer.validated_data.get("web_search", True)
-        reply = _chat_reply(message)
+        workspace_context = serializer.validated_data.get("workspace_context", "")
+        reply = _chat_reply(message) if not workspace_context else None
 
         if reply is not None:
             return Response({
@@ -247,7 +337,13 @@ class ChatView(APIView):
                 results = search_web(message, max_results=5)
                 web_context = format_search_results(results)
 
-            llm_reply = chat_with_llm(message, history, web_context=web_context, model=model or None)
+            llm_reply = chat_with_llm(
+                message,
+                history,
+                web_context=web_context,
+                model=model or None,
+                workspace_context=workspace_context,
+            )
             return Response({
                 "type": "chat",
                 "message": llm_reply,
@@ -255,6 +351,23 @@ class ChatView(APIView):
 
         except Exception as exc:
             logger.warning("LLM chat failed, falling back: %s", exc)
+            if workspace_context:
+                error_text = str(exc).upper()
+                status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                if "ACCESS_TOKEN_TYPE_UNSUPPORTED" in error_text:
+                    detail = "Google rejected the credential type"
+                elif status_code in (401, 403) or "API KEY NOT VALID" in error_text:
+                    detail = "Google rejected the credential or its permissions"
+                elif status_code == 429:
+                    detail = "the provider quota or rate limit was reached"
+                elif "TOKEN" in error_text and ("LIMIT" in error_text or "CONTEXT" in error_text):
+                    detail = "the project context exceeds the selected model's input limit"
+                else:
+                    detail = f"the provider request failed ({type(exc).__name__})"
+                return Response({
+                    "type": "chat",
+                    "error": f"Workspace model request failed: {detail}. Check the selected model and try again.",
+                }, status=502)
             try:
                 from src.web_search import search_web, format_search_results
 

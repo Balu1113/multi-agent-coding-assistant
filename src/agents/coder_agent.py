@@ -33,9 +33,28 @@ def _format_history(history: list[dict[str, Any]]) -> str:
     if not history:
         return ""
     lines = ["\n\nPrevious conversation:"]
+    workspace_chars = 0
     for h in history:
         p = h.get("prompt", "")
         r = h.get("result", {})
+        if isinstance(r, dict) and r.get("type") == "workspace_context":
+            inventory = r.get("inventory", "")
+            if isinstance(inventory, str) and inventory:
+                lines.append(f"\nProject file inventory:\n{inventory[:8000]}")
+            lines.append("\nCurrent workspace files:")
+            for file in r.get("files", []):
+                if not isinstance(file, dict) or workspace_chars >= 60000:
+                    break
+                path = file.get("path", "(unknown path)")
+                content = file.get("content", "")
+                if not isinstance(content, str):
+                    continue
+                snippet = content[:60000 - workspace_chars]
+                lines.append(f"\n--- {path} ---\n{snippet}")
+                workspace_chars += len(snippet)
+                if file.get("truncated") or len(snippet) < len(content):
+                    lines.append("[File content truncated to fit model context]")
+            continue
         if isinstance(r, dict) and r.get("type") == "coding":
             lines.append(f"User: {p[:200]}")
             lines.append(f"Assistant: [generated code with review and tests]")
@@ -111,10 +130,12 @@ class CoderAgent(BaseAgent):
 
         try:
             code = await asyncio.to_thread(lambda: generate_code_with_llm(context_prompt, language))
-        except Exception as e:
-            logger.error("LLM code generation failed, falling back: %s", e)
-            from src.code_gen import _generate_from_description
-            code = f"# LLM unavailable: {e}\n\n" + _generate_from_description(prompt, language)
+        except Exception as exc:
+            logger.exception("LLM code generation failed")
+            raise RuntimeError(
+                "Code generation failed because the configured model request failed. "
+                "Check the selected model and provider credentials, then retry."
+            ) from exc
 
         docs = await self.retriever.retrieve(prompt, top_k=2)
         context_lines = "\n".join(
